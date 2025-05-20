@@ -1,113 +1,162 @@
+# M/M/1 Queue Simulation with Dynamic Warm-Up Detection and Departure Delay Plotting
 import random
 from queue import PriorityQueue
 import matplotlib.pyplot as plt
 
-# ****************************************************************************
+# ******************************************************************************
 # Constants
-# ****************************************************************************
+# ******************************************************************************
+SERVICE = 10.0
+ARRIVAL = 5.0
+SIM_TIME = 500000
+LOG_INTERVAL = 1000
+epsilon = 0.0005
+detection_window = 20
 
-ARRIVAL = 5.0  # Fixed average inter-arrival time
-SIM_TIME = 500000  # Total simulation time
-SERVICE_VALUES = [i for i in range(5, 41, 2)]  # Average service times: 5.0 to 40.0 in steps of 2
+TYPE1 = 1
+arrivals = 0
+users = 0
 
-
-# ****************************************************************************
+# ******************************************************************************
 # Classes
-# ****************************************************************************
+# ******************************************************************************
 class Measure:
-    def __init__(self, arr=0, dep=0, ut=0, oldT=0, delay=0):
-        self.arr = arr
-        self.dep = dep
-        self.ut = ut
-        self.oldT = oldT
-        self.delay = delay
+    def __init__(self, Narr, Ndep, NAveraegUser, OldTimeEvent, AverageDelay):
+        self.arr = Narr
+        self.dep = Ndep
+        self.ut = NAveraegUser
+        self.oldT = OldTimeEvent
+        self.delay = AverageDelay
 
 class Client:
     def __init__(self, type, arrival_time):
         self.type = type
         self.arrival_time = arrival_time
 
-# ****************************************************************************
-# Functions
-# ****************************************************************************
-def arrival(time, FES, queue, data, SERVICE):
-    data.arr += 1
-    data.ut += len(queue) * (time - data.oldT)
-    data.oldT = time
+class Server:
+    def __init__(self):
+        self.idle = True
 
+# ******************************************************************************
+# Event Functions
+# ******************************************************************************
+def arrival(time, FES, queue):
+    global users
+    data.arr += 1
+    data.ut += users * (time - data.oldT)
+    data.oldT = time
     inter_arrival = random.expovariate(1.0 / ARRIVAL)
     FES.put((time + inter_arrival, "arrival"))
-
-    client = Client(1, time)
+    users += 1
+    client = Client(TYPE1, time)
     queue.append(client)
-
-    if len(queue) == 1:
+    if users == 1:
         service_time = random.expovariate(1.0 / SERVICE)
         FES.put((time + service_time, "departure"))
 
-def departure(time, FES, queue, data, SERVICE):
+def departure(time, FES, queue):
+    global users, avg_delay_prev, steady_detected, steady_time, recent_changes
+
     data.dep += 1
-    data.ut += len(queue) * (time - data.oldT)
+    data.ut += users * (time - data.oldT)
     data.oldT = time
-
     client = queue.pop(0)
-    data.delay += (time - client.arrival_time)
+    users -= 1
 
-    if len(queue) > 0:
+    # measure delay here  
+    delay = time - client.arrival_time
+    data.delay += delay
+
+    #  compute the current avg delay 
+    avg_delay_curr = data.delay / data.dep
+    departure_log.append((time, avg_delay_curr))  # Track for plotting
+
+    # once we have more than 1 departure 
+    # compute how much the avg delay changed 
+    # stor delay evolution for plotting 
+    if data.dep > 1:
+        delta = abs(avg_delay_curr - avg_delay_prev)
+        relative_change = delta / avg_delay_prev if avg_delay_prev > 0 else 1
+        delay_evolution.append((time, avg_delay_curr))
+
+        # check if the change is less than epsilon
+        if not steady_detected:
+            recent_changes.append(relative_change)
+            if len(recent_changes) > detection_window:
+                recent_changes.pop(0)
+                if all(change < epsilon for change in recent_changes):
+                    steady_detected = True
+                    steady_time = time
+    avg_delay_prev = avg_delay_curr
+
+    if users > 0:
         service_time = random.expovariate(1.0 / SERVICE)
         FES.put((time + service_time, "departure"))
 
-# ****************************************************************************
-# Main Simulation Loop
-# ****************************************************************************
-results = []
+# ******************************************************************************
+# Main Simulation
+# ******************************************************************************
+random.seed(42)
+data = Measure(0, 0, 0, 0, 0)
+time = 0
+FES = PriorityQueue()
+MM1 = []
+FES.put((0, "arrival"))
 
-for SERVICE in SERVICE_VALUES:
-    random.seed(42)
-    data = Measure()
-    time = 0
-    FES = PriorityQueue()
-    MM1 = []
+avg_delay_prev = 0
+delay_evolution = []
+departure_log = []  # New: log of (departure time, avg delay)
+recent_changes = []
+steady_detected = False
+steady_time = None
+next_log_time = LOG_INTERVAL
+logs = []
 
-    FES.put((0, "arrival"))
+while time < SIM_TIME:
+    (time, event_type) = FES.get()
+    if event_type == "arrival":
+        arrival(time, FES, MM1)
+    elif event_type == "departure":
+        departure(time, FES, MM1)
 
-    while time < SIM_TIME:
-        (time, event_type) = FES.get()
+    if time >= next_log_time:
+        avg_users = data.ut / time
+        avg_delay = data.delay / data.dep if data.dep > 0 else 0
+        logs.append((time, avg_users, avg_delay))
+        next_log_time += LOG_INTERVAL
 
-        if event_type == "arrival":
-            arrival(time, FES, MM1, data, SERVICE)
-        elif event_type == "departure":
-            departure(time, FES, MM1, data, SERVICE)
+# ******************************************************************************
+# Output and Plotting
+# ******************************************************************************
+if steady_detected:
+    print(f"Steady state detected at time: {steady_time}")
+else:
+    print("Steady state not detected within simulation time.")
 
-    results.append({
-        'Service Time': SERVICE,
-        'Load': SERVICE / ARRIVAL,
-        'Arrival Rate': data.arr / time,
-        'Departure Rate': data.dep / time,
-        'Average Users': data.ut / time,
-        'Average Delay': data.delay / data.dep,
-        'Queue Size at End': len(MM1)
-    })
+# Plot delay evolution (for steady state detection)
+times = [t for (t, d) in delay_evolution]
+delays = [d for (t, d) in delay_evolution]
 
-# Plotting the results
-loads = [r['Load'] for r in results]
-avg_delays = [r['Average Delay'] for r in results]
-avg_users = [r['Average Users'] for r in results]
-
-plt.figure(figsize=(8, 5))
-plt.plot(loads, avg_delays, marker='o')
-plt.xlabel("System Load (ρ = SERVICE / ARRIVAL)")
+plt.figure()
+plt.plot(times, delays, label='Avg Delay (Steady-State Detection)')
+if steady_detected:
+    plt.axvline(x=steady_time, color='r', linestyle='--', label='Steady State Detected')
+plt.xlabel("Time")
 plt.ylabel("Average Delay")
-plt.title("Average Delay vs Load")
+plt.title("Average Delay Over Time (for Steady State Detection)")
 plt.grid(True)
-plt.tight_layout()
+plt.legend()
 plt.show()
 
-plt.figure(figsize=(8, 5))
-plt.plot(loads, avg_users, marker='o')
-plt.xlabel("System Load (ρ = SERVICE / ARRIVAL)")
-plt.ylabel("Average Number of Users")
-plt.title("Average Users vs Load")
+# Plot departure time vs average delay
+dep_times = [t for (t, d) in departure_log]
+dep_delays = [d for (t, d) in departure_log]
+
+plt.figure()
+plt.plot(dep_times, dep_delays, label='Avg Delay at Each Departure')
+plt.xlabel("Departure Time")
+plt.ylabel("Average Delay")
+plt.title("Average Delay vs Departure Time")
 plt.grid(True)
-plt.tight_layout()
+plt.legend()
 plt.show()
