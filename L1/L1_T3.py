@@ -143,18 +143,18 @@ def run_simulation(strategy):
     return avg_delays
 
 # ******************************************************************************
-# Run all strategies and collect results
+# Run all
 # ******************************************************************************
 strategy_delays = {}
 for strat in STRATEGIES:
-    random.seed(42)  # Reset seed for fair comparison
+    random.seed(42)
     strategy_delays[strat] = run_simulation(strat)
 
 # ******************************************************************************
-# Plotting: Average Delay per Server for Each Strategy
+# plot average delay per server for each strategy
 # ******************************************************************************
 
-x = np.arange(NUM_SERVERS)  # server IDs
+x = np.arange(NUM_SERVERS)
 width = 0.2
 
 fig, ax = plt.subplots(figsize=(10, 6))
